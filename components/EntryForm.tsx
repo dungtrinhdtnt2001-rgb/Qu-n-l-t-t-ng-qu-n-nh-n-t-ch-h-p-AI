@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Sentiment, PersonnelInfo, HistoryEntry } from '../types';
 import Card from './common/Card';
 
@@ -38,6 +38,25 @@ const EntryForm: React.FC<EntryFormProps> = ({ onAnalyze, isLoading, history }) 
     unit: '',
   });
   const [error, setError] = useState('');
+  
+  // State for individual date components
+  const [day, setDay] = useState('');
+  const [month, setMonth] = useState('');
+  const [year, setYear] = useState('');
+
+  // Sync from personnelInfo.dob to local day/month/year state for autofill
+  useEffect(() => {
+    if (personnelInfo.dob && /^\d{4}-\d{2}-\d{2}$/.test(personnelInfo.dob)) {
+      const [y, m, d] = personnelInfo.dob.split('-');
+      setYear(y);
+      setMonth(String(parseInt(m, 10)));
+      setDay(String(parseInt(d, 10)));
+    } else {
+      setDay('');
+      setMonth('');
+      setYear('');
+    }
+  }, [personnelInfo.dob]);
 
   const handleInfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -52,9 +71,36 @@ const EntryForm: React.FC<EntryFormProps> = ({ onAnalyze, isLoading, history }) 
     }
   };
 
+  const handleDateChange = (part: 'day' | 'month' | 'year', value: string) => {
+    const newDate = { day, month, year };
+    newDate[part] = value;
+
+    // If month or year changes, the selected day might become invalid (e.g., 31st of Feb).
+    if (part === 'month' || part === 'year') {
+        const daysInNewMonth = (newDate.year && newDate.month) ? new Date(parseInt(newDate.year), parseInt(newDate.month), 0).getDate() : 31;
+        if (parseInt(newDate.day) > daysInNewMonth) {
+            newDate.day = ''; // Reset day so user must select a valid one
+        }
+    }
+
+    setDay(newDate.day);
+    setMonth(newDate.month);
+    setYear(newDate.year);
+    
+    // Combine into YYYY-MM-DD format and update the main state
+    if (newDate.year && newDate.month && newDate.day) {
+        const dobString = `${newDate.year}-${String(newDate.month).padStart(2, '0')}-${String(newDate.day).padStart(2, '0')}`;
+        setPersonnelInfo(prev => ({ ...prev, dob: dobString }));
+    } else {
+        // If any part is missing, the DOB is incomplete
+        setPersonnelInfo(prev => ({ ...prev, dob: '' }));
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (Object.values(personnelInfo).some(field => field.trim() === '')) {
+    // FIX: Add type guard to ensure `field` is a string before calling `trim()`
+    if (Object.values(personnelInfo).some(field => typeof field === 'string' && field.trim() === '')) {
       setError('Vui lòng điền đầy đủ thông tin quân nhân.');
       return;
     }
@@ -67,6 +113,26 @@ const EntryForm: React.FC<EntryFormProps> = ({ onAnalyze, isLoading, history }) 
   };
   
   const personnelNames = Object.keys(history);
+
+  // Memoized lists for select options
+  const yearOptions = useMemo(() => {
+    const current = new Date().getFullYear();
+    // Typical military age range, e.g., 18-65
+    const startYear = current - 18;
+    const endYear = current - 65;
+    const years = [];
+    for (let y = startYear; y >= endYear; y--) {
+        years.push(y);
+    }
+    return years;
+  }, []);
+
+  const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, i) => i + 1), []);
+  
+  const dayOptions = useMemo(() => {
+    const daysInMonth = (year && month) ? new Date(parseInt(year), parseInt(month), 0).getDate() : 31;
+    return Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  }, [year, month]);
 
   return (
     <Card>
@@ -81,8 +147,21 @@ const EntryForm: React.FC<EntryFormProps> = ({ onAnalyze, isLoading, history }) 
                 </datalist>
             </div>
             <div>
-                <label htmlFor="dob" className="block text-sm font-medium text-lime-300 mb-1">Ngày sinh</label>
-                <input type="date" name="dob" id="dob" value={personnelInfo.dob} onChange={handleInfoChange} className="form-input" disabled={isLoading} />
+                <label htmlFor="dob-day" className="block text-sm font-medium text-lime-300 mb-1">Ngày sinh</label>
+                <div className="grid grid-cols-3 gap-2">
+                    <select id="dob-day" name="day" value={day} onChange={(e) => handleDateChange('day', e.target.value)} className="form-input" disabled={isLoading} required>
+                        <option value="">Ngày</option>
+                        {dayOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <select id="dob-month" name="month" value={month} onChange={(e) => handleDateChange('month', e.target.value)} className="form-input" disabled={isLoading} required>
+                        <option value="">Tháng</option>
+                        {monthOptions.map(m => <option key={m} value={m}>Tháng {m}</option>)}
+                    </select>
+                    <select id="dob-year" name="year" value={year} onChange={(e) => handleDateChange('year', e.target.value)} className="form-input" disabled={isLoading} required>
+                        <option value="">Năm</option>
+                        {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                </div>
             </div>
             <div>
                 <label htmlFor="rank" className="block text-sm font-medium text-lime-300 mb-1">Cấp bậc</label>
@@ -159,6 +238,14 @@ style.innerHTML = `
     border-radius: 0.5rem;
     transition: all 0.2s;
     color: #cbd5e1; /* slate-300 */
+    -moz-appearance: none;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23a3e635' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
   }
   .form-input:focus {
     outline: none;

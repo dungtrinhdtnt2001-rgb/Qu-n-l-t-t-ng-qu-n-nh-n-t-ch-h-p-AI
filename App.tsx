@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { AnalysisResult, Sentiment, PersonnelInfo, HistoryEntry } from './types';
 import EntryForm from './components/EntryForm';
@@ -6,8 +7,11 @@ import PersonnelList from './components/PersonnelList';
 import HistoricalReport from './components/HistoricalReport';
 import { analyzeThoughtLog } from './services/geminiService';
 import { VietnamEmblemIcon } from './components/icons/VietnamEmblemIcon';
+import Card from './components/common/Card';
 
-type View = 'form' | 'analysis' | 'personnel_list' | 'history_report';
+type View = 'form' | 'analysis' | 'history_dashboard';
+
+const STORAGE_KEY = 'military_global_history';
 
 const App: React.FC = () => {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
@@ -18,15 +22,25 @@ const App: React.FC = () => {
   const [view, setView] = useState<View>('form');
   const [selectedPersonForReport, setSelectedPersonForReport] = useState<string | null>(null);
 
-
+  // Load history on mount
   useEffect(() => {
     try {
-      const savedHistory = localStorage.getItem('militaryAnalysisHistory');
+      const savedHistory = localStorage.getItem(STORAGE_KEY);
       if (savedHistory) {
-        setHistory(JSON.parse(savedHistory));
+        const parsedHistory = JSON.parse(savedHistory);
+        setHistory(parsedHistory);
+        const personnelNames = Object.keys(parsedHistory).sort();
+        // If there is history, verify if we should show dashboard or form. 
+        // Defaulting to form for new entries is usually better for workflow, 
+        // but let's stick to showing dashboard if data exists to show "aliveness".
+        if (personnelNames.length > 0) {
+          setView('history_dashboard');
+          setSelectedPersonForReport(personnelNames[0]);
+        }
       }
     } catch (e) {
       console.error("Failed to load history from localStorage", e);
+      setHistory({});
     }
   }, []);
 
@@ -35,7 +49,7 @@ const App: React.FC = () => {
     setError(null);
     setAnalysisResult(null);
     setPersonnelInfo(info);
-    setView('form'); // Keep view on form to show loader
+    setView('form');
 
     try {
       const result = await analyzeThoughtLog(entry, sentiment, info);
@@ -48,10 +62,13 @@ const App: React.FC = () => {
       const updatedHistory = { ...history };
       const personHistory = updatedHistory[info.fullName] || [];
       personHistory.push(newEntry);
-      updatedHistory[info.fullName] = [...personHistory];
+      
+      // Sort history by date descending
+      updatedHistory[info.fullName] = [...personHistory].sort((a,b) => new Date(b.analysis.date).getTime() - new Date(a.analysis.date).getTime());
       
       setHistory(updatedHistory);
-      localStorage.setItem('militaryAnalysisHistory', JSON.stringify(updatedHistory));
+      // Save to global local storage
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory));
 
     } catch (e) {
       console.error(e);
@@ -63,20 +80,13 @@ const App: React.FC = () => {
 
   const handleSelectPersonForReport = (name: string) => {
     setSelectedPersonForReport(name);
-    setView('history_report');
   };
   
   const handleBackToForm = () => {
     setAnalysisResult(null);
     setPersonnelInfo(null);
     setError(null);
-    setSelectedPersonForReport(null);
     setView('form');
-  };
-
-  const handleBackToPersonnelList = () => {
-    setSelectedPersonForReport(null);
-    setView('personnel_list');
   };
   
   const renderContent = () => {
@@ -121,36 +131,57 @@ const App: React.FC = () => {
                   />;
              }
              return null;
-        case 'personnel_list':
-            return <PersonnelList history={history} onSelect={handleSelectPersonForReport} onBack={handleBackToForm} />;
-        case 'history_report':
-            if (selectedPersonForReport && history[selectedPersonForReport]) {
-                return <HistoricalReport 
-                    personnelName={selectedPersonForReport} 
-                    history={history[selectedPersonForReport]} 
-                    onBack={handleBackToPersonnelList} 
-                />;
-            }
-            return null; // Should not happen
+        case 'history_dashboard':
+            return (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+                    <div className="lg:col-span-1">
+                        <PersonnelList 
+                            history={history} 
+                            onSelect={handleSelectPersonForReport}
+                            selectedPersonnel={selectedPersonForReport}
+                        />
+                    </div>
+                    <div className="lg:col-span-2">
+                        {selectedPersonForReport && history[selectedPersonForReport] ? (
+                            <HistoricalReport 
+                                key={selectedPersonForReport}
+                                personnelName={selectedPersonForReport} 
+                                history={history[selectedPersonForReport]} 
+                            />
+                        ) : (
+                            <Card className="flex items-center justify-center min-h-[400px]">
+                                <p className="text-lime-300 text-center">
+                                  {Object.keys(history).length > 0
+                                    ? 'Chọn một quân nhân từ danh sách để xem báo cáo chi tiết.'
+                                    : 'Chưa có dữ liệu lịch sử. Vui lòng nhập một bản phân tích mới để bắt đầu.'
+                                  }
+                                </p>
+                            </Card>
+                        )}
+                    </div>
+                </div>
+            );
         default:
             return <EntryForm onAnalyze={handleAnalysis} isLoading={isLoading} history={history} />;
     }
   }
 
-
   return (
     <div className="bg-lime-950 min-h-screen text-slate-200 font-sans p-4 sm:p-6 lg:p-8 flex flex-col items-center">
       <header className="w-full max-w-5xl mb-6">
-        <div className="text-center mb-6">
-            <div className="flex items-center justify-center gap-4">
-              <VietnamEmblemIcon className="h-12 w-12" />
-              <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 tracking-wider">
-                Hệ Thống Phân Tích Tư Tưởng Quân Nhân
-              </h1>
+        <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+            <div className="flex items-center gap-4">
+              <VietnamEmblemIcon className="h-12 w-12 flex-shrink-0" />
+              <div>
+                <h1 className="text-xl sm:text-3xl font-bold text-slate-100 tracking-wider">
+                  Hệ Thống Phân Tích Tư Tưởng Quân Nhân
+                </h1>
+                <p className="text-lime-300 mt-1 text-sm sm:text-base hidden sm:block">
+                  Trợ lý AI giúp cung cấp thông tin chi tiết về tư tưởng và tinh thần.
+                </p>
+              </div>
             </div>
-            <p className="text-lime-300 mt-2 text-sm sm:text-base">
-              Trợ lý AI giúp cung cấp thông tin chi tiết về tư tưởng và tinh thần.
-            </p>
+            {/* Login section removed */}
         </div>
         
         <nav className="flex justify-center bg-lime-900/70 p-2 rounded-lg border border-lime-800 space-x-2">
@@ -161,9 +192,9 @@ const App: React.FC = () => {
               Nhập Phân Tích Mới
             </button>
             <button 
-              onClick={() => setView('personnel_list')}
+              onClick={() => setView('history_dashboard')}
               disabled={Object.keys(history).length === 0}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${view === 'personnel_list' || view === 'history_report' ? 'bg-amber-600 text-white' : 'text-lime-200 hover:bg-lime-800'} disabled:text-lime-600 disabled:hover:bg-transparent disabled:cursor-not-allowed`}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${view === 'history_dashboard' ? 'bg-amber-600 text-white' : 'text-lime-200 hover:bg-lime-800'} disabled:text-lime-600 disabled:hover:bg-transparent disabled:cursor-not-allowed`}
             >
               Xem Báo Cáo Lịch Sử
             </button>

@@ -149,26 +149,29 @@ const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({ result, personnel
           <p className="text-slate-300 leading-relaxed text-justify">{result.summary}</p>
         </div>
 
-        {/* Insights */}
-        <div className="mt-6 bg-lime-900 p-4 rounded-lg border-l-4" style={{borderColor: sentimentColor}}>
-          <h3 className="font-semibold text-lime-300 mb-2 flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-            Nhận định & Phân tích tâm lý
-          </h3>
-          <p className="text-slate-300 leading-relaxed text-justify">{result.insights}</p>
-        </div>
-        
-        {/* Officer Recommendations */}
-        <div className="mt-6 bg-amber-900/30 border border-amber-700 p-4 rounded-lg">
-          <h3 className="font-bold text-amber-300 mb-2 flex items-center gap-2">
-             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-             </svg>
-            Biện pháp đề xuất cho Cán bộ Chính trị
-          </h3>
-          <p className="text-amber-100 leading-relaxed text-justify whitespace-pre-line">{result.officerRecommendations}</p>
+        {/* Insights & Recommendations */}
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Insights */}
+            <div className="bg-lime-900 p-4 rounded-lg border-l-4 h-full" style={{borderColor: sentimentColor}}>
+            <h3 className="font-semibold text-lime-300 mb-2 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+                Nhận định & Phân tích tâm lý
+            </h3>
+            <p className="text-slate-300 leading-relaxed text-justify">{result.insights}</p>
+            </div>
+            
+            {/* Officer Recommendations */}
+            <div className="bg-amber-900/30 border border-amber-700 p-4 rounded-lg h-full">
+            <h3 className="font-bold text-amber-300 mb-2 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+                Biện pháp đề xuất cho Cán bộ Chính trị
+            </h3>
+            <p className="text-amber-100 leading-relaxed text-justify whitespace-pre-line">{result.officerRecommendations}</p>
+            </div>
         </div>
 
         <button
