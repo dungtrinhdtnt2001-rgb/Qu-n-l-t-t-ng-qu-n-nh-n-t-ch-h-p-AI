@@ -1,214 +1,263 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { AnalysisResult, Sentiment, PersonnelInfo, HistoryEntry } from './types';
+import { AnalysisResult, Sentiment, PersonnelInfo, HistoryEntry, CentralDatabase, ActivityLog, User, UserRole } from './types';
 import EntryForm from './components/EntryForm';
 import AnalysisDashboard from './components/AnalysisDashboard';
-import PersonnelList from './components/PersonnelList';
+import CommanderDashboard from './components/CommanderDashboard';
 import HistoricalReport from './components/HistoricalReport';
+import OfficerHistory from './components/OfficerHistory';
+import Login from './components/Login';
+import ChatBot from './components/ChatBot';
 import { analyzeThoughtLog } from './services/geminiService';
+import { storageService } from './services/storageService';
 import { VietnamEmblemIcon } from './components/icons/VietnamEmblemIcon';
 import Card from './components/common/Card';
 
-type View = 'form' | 'analysis' | 'history_dashboard';
+type View = 'dashboard' | 'form' | 'analysis' | 'report' | 'sync' | 'officer-history';
 
-const STORAGE_KEY = 'military_global_history';
+const SESSION_KEY = 'MILITARY_USER_SESSION';
 
 const App: React.FC = () => {
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [personnelInfo, setPersonnelInfo] = useState<PersonnelInfo | null>(null);
+  const [db, setDb] = useState<CentralDatabase>({ history: {}, activities: [] });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentAnalysis, setCurrentAnalysis] = useState<{ result: AnalysisResult, info: PersonnelInfo } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<Record<string, HistoryEntry[]>>({});
-  const [view, setView] = useState<View>('form');
-  const [selectedPersonForReport, setSelectedPersonForReport] = useState<string | null>(null);
+  const [view, setView] = useState<View>('dashboard');
+  const [selectedPerson, setSelectedPerson] = useState<string | null>(null);
+  const [showSyncCode, setShowSyncCode] = useState<string | null>(null);
+  const [copySuccess, setCopySuccess] = useState(false);
 
-  // Load history on mount
   useEffect(() => {
     try {
-      const savedHistory = localStorage.getItem(STORAGE_KEY);
-      if (savedHistory) {
-        const parsedHistory = JSON.parse(savedHistory);
-        setHistory(parsedHistory);
-        const personnelNames = Object.keys(parsedHistory).sort();
-        // If there is history, verify if we should show dashboard or form. 
-        // Defaulting to form for new entries is usually better for workflow, 
-        // but let's stick to showing dashboard if data exists to show "aliveness".
-        if (personnelNames.length > 0) {
-          setView('history_dashboard');
-          setSelectedPersonForReport(personnelNames[0]);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to load history from localStorage", e);
-      setHistory({});
+      setDb(storageService.getDatabase());
+    } catch (e) { console.error("Load DB fail", e); }
+    
+    const savedUser = sessionStorage.getItem(SESSION_KEY);
+    if (savedUser) {
+        try {
+          const user = JSON.parse(savedUser);
+          setCurrentUser(user);
+          setView(user.role === UserRole.Admin ? 'dashboard' : 'form');
+        } catch (e) { sessionStorage.removeItem(SESSION_KEY); }
     }
   }, []);
 
+  const handleLogin = async (username: string, password?: string, role?: UserRole, rank?: string, position?: string, unit?: string) => {
+    if (role === UserRole.Admin) {
+      if (password !== '78564') return { success: false, message: 'Mật khẩu quản trị không chính xác.' };
+      const user: User = { username: 'admin', role: UserRole.Admin, fullName: 'CHỈ HUY TRƯỞNG' };
+      setCurrentUser(user);
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      setView('dashboard');
+      return { success: true };
+    } else {
+      const user: User = { username, role: UserRole.Officer, fullName: username.toUpperCase(), rank, position, unit };
+      setCurrentUser(user);
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      setView('form');
+      return { success: true };
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    sessionStorage.removeItem(SESSION_KEY);
+    setView('dashboard');
+  };
+
+  const saveAndSync = (updatedDb: CentralDatabase) => {
+    setDb(updatedDb);
+    storageService.saveDatabase(updatedDb);
+  };
+
+  const logActivity = (operatorName: string, action: string, targetPersonnel?: string) => {
+    return [{ id: Math.random().toString(36).substr(2, 9), operatorName, action, targetPersonnel, timestamp: new Date().toISOString() }];
+  };
+
   const handleAnalysis = useCallback(async (entry: string, sentiment: Sentiment, info: PersonnelInfo) => {
+    if (!currentUser) return;
     setIsLoading(true);
     setError(null);
-    setAnalysisResult(null);
-    setPersonnelInfo(info);
-    setView('form');
-
     try {
       const result = await analyzeThoughtLog(entry, sentiment, info);
       const analysisWithDate: AnalysisResult = { ...result, date: new Date().toISOString() };
-      
-      setAnalysisResult(analysisWithDate);
-      setView('analysis');
+      const newEntry: HistoryEntry = { info, analysis: analysisWithDate, operatorUsername: currentUser.username, operatorName: currentUser.fullName, operatorRank: currentUser.rank, operatorPosition: currentUser.position, operatorUnit: currentUser.unit, timestamp: new Date().toISOString() };
 
-      const newEntry: HistoryEntry = { info, analysis: analysisWithDate };
-      const updatedHistory = { ...history };
+      const updatedHistory = { ...db.history };
       const personHistory = updatedHistory[info.fullName] || [];
-      personHistory.push(newEntry);
+      updatedHistory[info.fullName] = [newEntry, ...personHistory];
       
-      // Sort history by date descending
-      updatedHistory[info.fullName] = [...personHistory].sort((a,b) => new Date(b.analysis.date).getTime() - new Date(a.analysis.date).getTime());
-      
-      setHistory(updatedHistory);
-      // Save to global local storage
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory));
+      const displayOperator = currentUser.rank ? `${currentUser.rank} ${currentUser.fullName}` : currentUser.fullName;
+      const newActivities = [...db.activities, ...logActivity(displayOperator, 'Đã nhập liệu phân tích cho', info.fullName)];
 
-    } catch (e) {
-      console.error(e);
-      setError('Không thể phân tích. Vui lòng thử lại sau.');
-    } finally {
-      setIsLoading(false);
+      saveAndSync({ history: updatedHistory, activities: newActivities });
+      setCurrentAnalysis({ result: analysisWithDate, info });
+      setView('analysis');
+    } catch (e) { setError('Lỗi kết nối máy chủ AI hoặc CSDL.'); } finally { setIsLoading(false); }
+  }, [db, currentUser]);
+
+  const handleDeletePersonnel = (name: string) => {
+    if (!window.confirm(`Đồng chí có chắc chắn muốn xóa toàn bộ hồ sơ của quân nhân ${name}? Hành động này không thể hoàn tác.`)) return;
+    
+    const updatedHistory = { ...db.history };
+    delete updatedHistory[name];
+    
+    const operator = currentUser?.fullName || 'Hệ thống';
+    const newActivities = [...db.activities, ...logActivity(operator, 'Đã xóa toàn bộ hồ sơ của', name)];
+    
+    saveAndSync({ history: updatedHistory, activities: newActivities });
+    if (selectedPerson === name) {
+        setSelectedPerson(null);
+        setView('dashboard');
     }
-  }, [history]);
+  };
 
-  const handleSelectPersonForReport = (name: string) => {
-    setSelectedPersonForReport(name);
+  const handleDeleteEntry = (name: string, timestamp: string) => {
+    if (!window.confirm(`Xác nhận xóa bản ghi này?`)) return;
+    
+    const updatedHistory = { ...db.history };
+    if (updatedHistory[name]) {
+        updatedHistory[name] = updatedHistory[name].filter(e => e.timestamp !== timestamp);
+        if (updatedHistory[name].length === 0) {
+            delete updatedHistory[name];
+        }
+    }
+    
+    const operator = currentUser?.fullName || 'Hệ thống';
+    const newActivities = [...db.activities, ...logActivity(operator, 'Đã xóa 1 bản ghi của', name)];
+    
+    saveAndSync({ history: updatedHistory, activities: newActivities });
   };
-  
-  const handleBackToForm = () => {
-    setAnalysisResult(null);
-    setPersonnelInfo(null);
-    setError(null);
-    setView('form');
+
+  const generateOfficerSync = async (selectedEntries?: HistoryEntry[]) => {
+    setIsLoading(true);
+    try {
+      const code = await storageService.generateSyncPackage(db, selectedEntries);
+      setShowSyncCode(code);
+      setView('sync');
+      setCopySuccess(false);
+    } catch (e) { setError("Không thể nén dữ liệu."); } finally { setIsLoading(false); }
   };
-  
+
+  const handleMergeSync = async (token: string) => {
+    try {
+      const result = await storageService.mergeData(db, token);
+      setDb(result.db);
+      return result.addedCount;
+    } catch (e) { throw e; }
+  };
+
+  const handleCopy = () => {
+    if (showSyncCode) {
+      navigator.clipboard.writeText(showSyncCode);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }
+  };
+
   const renderContent = () => {
-    if (isLoading) {
-      return (
-        <div className="flex flex-col items-center justify-center bg-lime-900/50 p-8 rounded-lg shadow-2xl">
-            <svg className="animate-spin h-10 w-10 text-amber-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <p className="mt-4 text-lg font-semibold text-slate-200">AI đang phân tích...</p>
-            <p className="text-lime-300">Quá trình này có thể mất một vài giây.</p>
-        </div>
-      );
-    }
+    if (isLoading) return (
+      <div className="flex flex-col items-center justify-center p-20 animate-pulse">
+          <VietnamEmblemIcon className="h-20 w-20 mb-6 opacity-40" />
+          <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.4em]">Hệ thống đang nén dữ liệu quân sự...</p>
+      </div>
+    );
 
-    if (error) {
-        return (
-            <div className="bg-red-900/30 border border-red-500 text-red-300 px-4 py-3 rounded-lg text-center">
-                <p className="font-bold">Đã xảy ra lỗi</p>
-                <p>{error}</p>
-                <button
-                    onClick={handleBackToForm}
-                    className="mt-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-md transition-colors"
-                >
-                    Thử lại
-                </button>
-            </div>
-        );
-    }
-
-    switch(view) {
-        case 'form':
-            return <EntryForm onAnalyze={handleAnalysis} isLoading={isLoading} history={history} />;
-        case 'analysis':
-             if (analysisResult && personnelInfo) {
-                 return <AnalysisDashboard 
-                    result={analysisResult} 
-                    personnelInfo={personnelInfo} 
-                    onReset={handleBackToForm}
-                    history={history[personnelInfo.fullName] || []}
-                  />;
-             }
-             return null;
-        case 'history_dashboard':
-            return (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
-                    <div className="lg:col-span-1">
-                        <PersonnelList 
-                            history={history} 
-                            onSelect={handleSelectPersonForReport}
-                            selectedPersonnel={selectedPersonForReport}
-                        />
-                    </div>
-                    <div className="lg:col-span-2">
-                        {selectedPersonForReport && history[selectedPersonForReport] ? (
-                            <HistoricalReport 
-                                key={selectedPersonForReport}
-                                personnelName={selectedPersonForReport} 
-                                history={history[selectedPersonForReport]} 
-                            />
-                        ) : (
-                            <Card className="flex items-center justify-center min-h-[400px]">
-                                <p className="text-lime-300 text-center">
-                                  {Object.keys(history).length > 0
-                                    ? 'Chọn một quân nhân từ danh sách để xem báo cáo chi tiết.'
-                                    : 'Chưa có dữ liệu lịch sử. Vui lòng nhập một bản phân tích mới để bắt đầu.'
-                                  }
-                                </p>
-                            </Card>
-                        )}
+    if (view === 'sync' && showSyncCode) return (
+      <div className="max-w-lg mx-auto animate-fade-in">
+        <Card className="border-amber-500/50 bg-black/60 !p-10 shadow-2xl relative overflow-hidden rounded-[3rem] text-center border-t-2">
+            <div className="relative z-10">
+                <div className="mb-6 flex justify-center">
+                    <div className="h-16 w-16 bg-amber-500/10 rounded-full flex items-center justify-center border border-amber-500/30">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
                     </div>
                 </div>
-            );
-        default:
-            return <EntryForm onAnalyze={handleAnalysis} isLoading={isLoading} history={history} />;
+                
+                <h2 className="text-amber-500 font-black text-xl uppercase tracking-widest mb-2">GÓI TIN ĐÃ NIÊM PHONG</h2>
+                <p className="text-slate-500 text-[10px] mb-8 uppercase tracking-widest">Giao thức nén: GZIP BINARY TOKEN</p>
+
+                <div className="bg-lime-900/10 border border-lime-800 rounded-2xl p-4 mb-8 flex items-center gap-4">
+                    <div className="flex-1 text-left">
+                        <p className="text-[8px] text-lime-600 font-black uppercase mb-1">Mã định danh Token</p>
+                        <p className="text-[11px] font-mono text-lime-400 truncate max-w-[200px]">{showSyncCode}</p>
+                    </div>
+                    <div className="h-10 w-px bg-lime-800/50"></div>
+                    <div className="text-right">
+                        <p className="text-[8px] text-lime-600 font-black uppercase mb-1">Dung lượng</p>
+                        <p className="text-[11px] font-mono text-amber-500">{(showSyncCode.length / 1024).toFixed(2)} KB</p>
+                    </div>
+                </div>
+
+                <button 
+                    onClick={handleCopy}
+                    className={`w-full py-5 rounded-2xl font-black text-xs transition-all shadow-xl active:scale-95 uppercase tracking-[0.3em] border-2 ${
+                        copySuccess ? 'bg-green-600 border-green-400 text-white' : 'bg-amber-600 hover:bg-amber-500 border-amber-400 text-white'
+                    }`}
+                >
+                    {copySuccess ? 'ĐÃ SAO CHÉP TOKEN' : 'SAO CHÉP TOKEN GỬI ĐI'}
+                </button>
+                
+                <div className="mt-8 flex justify-center gap-6">
+                    <button onClick={() => setView('officer-history')} className="text-slate-500 hover:text-white text-[9px] font-black uppercase tracking-widest transition-all">Quay lại</button>
+                    <button onClick={() => setView('form')} className="text-slate-500 hover:text-white text-[9px] font-black uppercase tracking-widest transition-all">Nhập liệu mới</button>
+                </div>
+            </div>
+        </Card>
+      </div>
+    );
+
+    switch (view) {
+      case 'dashboard': return currentUser?.role === UserRole.Admin ? <CommanderDashboard database={db} onSelectPersonnel={(n) => { setSelectedPerson(n); setView('report'); }} onDatabaseUpdate={setDb} onSyncRequest={handleMergeSync} onDeletePersonnel={handleDeletePersonnel} /> : null;
+      case 'form': return <EntryForm onAnalyze={handleAnalysis} isLoading={isLoading} history={db.history} />;
+      case 'officer-history': return <OfficerHistory history={db.history} currentUserUsername={currentUser?.username || ''} onGenerateSync={generateOfficerSync} onDeleteEntry={handleDeleteEntry} />;
+      case 'analysis': return currentAnalysis ? <AnalysisDashboard result={currentAnalysis.result} personnelInfo={currentAnalysis.info} onReset={() => setView(currentUser?.role === UserRole.Admin ? 'dashboard' : 'officer-history')} history={db.history[currentAnalysis.info.fullName] || []} /> : null;
+      case 'report': return selectedPerson ? <HistoricalReport history={db.history[selectedPerson] || []} personnelName={selectedPerson} onDeleteEntry={(ts) => handleDeleteEntry(selectedPerson, ts)} /> : null;
+      default: return null;
     }
-  }
+  };
+
+  if (!currentUser) return <Login onLogin={handleLogin} />;
 
   return (
-    <div className="bg-lime-950 min-h-screen text-slate-200 font-sans p-4 sm:p-6 lg:p-8 flex flex-col items-center">
-      <header className="w-full max-w-5xl mb-6">
-        <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
-            <div className="flex items-center gap-4">
-              <VietnamEmblemIcon className="h-12 w-12 flex-shrink-0" />
-              <div>
-                <h1 className="text-xl sm:text-3xl font-bold text-slate-100 tracking-wider">
-                  Hệ Thống Phân Tích Tư Tưởng Quân Nhân
-                </h1>
-                <p className="text-lime-300 mt-1 text-sm sm:text-base hidden sm:block">
-                  Trợ lý AI giúp cung cấp thông tin chi tiết về tư tưởng và tinh thần.
-                </p>
-              </div>
-            </div>
-            {/* Login section removed */}
+    <div className="bg-lime-950 min-h-screen text-slate-200 font-sans selection:bg-amber-500/30">
+      <div className="bg-black/60 border-b border-lime-900/50 px-6 py-2 flex justify-between items-center text-[9px] font-black uppercase tracking-widest">
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-green-500"></span><span className="text-lime-500">MÁY CHỦ: TRỰC TUYẾN</span></div>
         </div>
-        
-        <nav className="flex justify-center bg-lime-900/70 p-2 rounded-lg border border-lime-800 space-x-2">
-            <button 
-              onClick={handleBackToForm}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${view === 'form' || view === 'analysis' ? 'bg-amber-600 text-white' : 'text-lime-200 hover:bg-lime-800'}`}
-            >
-              Nhập Phân Tích Mới
-            </button>
-            <button 
-              onClick={() => setView('history_dashboard')}
-              disabled={Object.keys(history).length === 0}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${view === 'history_dashboard' ? 'bg-amber-600 text-white' : 'text-lime-200 hover:bg-lime-800'} disabled:text-lime-600 disabled:hover:bg-transparent disabled:cursor-not-allowed`}
-            >
-              Xem Báo Cáo Lịch Sử
-            </button>
-        </nav>
+        <div className="flex items-center gap-6">
+          <span className="text-slate-400">{currentUser.fullName} [{currentUser.role}]</span>
+          <button onClick={handleLogout} className="text-red-500 hover:text-red-400 transition-all">ĐĂNG XUẤT</button>
+        </div>
+      </div>
 
+      <header className="max-w-7xl mx-auto p-4 sm:p-12">
+        <div className="flex flex-col lg:flex-row justify-between items-center gap-10 mb-16 text-center lg:text-left">
+          <div className="flex flex-col lg:flex-row items-center gap-8">
+            <VietnamEmblemIcon className="h-16 w-16 sm:h-24 sm:w-24 drop-shadow-[0_0_15px_rgba(218,37,29,0.4)]" />
+            <div>
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-100 uppercase tracking-tighter leading-none mb-3">QUẢN LÝ TƯ TƯỞNG QUÂN NHÂN</h1>
+              <p className="text-lime-500 font-bold text-xs sm:text-sm tracking-[0.4em] uppercase">Hệ thống phân tích hành vi quân nhân</p>
+            </div>
+          </div>
+          
+          <nav className="flex bg-lime-900/20 p-1.5 rounded-3xl border border-lime-800 backdrop-blur-md">
+            {currentUser?.role === UserRole.Admin && <button onClick={() => setView('dashboard')} className={`px-10 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'dashboard' ? 'bg-amber-600 text-white shadow-xl scale-105' : 'text-lime-600 hover:text-lime-400'}`}>Bảng Chỉ Huy</button>}
+            <button onClick={() => setView('form')} className={`px-10 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'form' ? 'bg-amber-600 text-white shadow-xl scale-105' : 'text-lime-600 hover:text-lime-400'}`}>Nhập Liệu</button>
+            {currentUser?.role === UserRole.Officer && <button onClick={() => setView('officer-history')} className={`px-10 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'officer-history' ? 'bg-amber-600 text-white shadow-xl scale-105' : 'text-lime-600 hover:text-lime-400'}`}>Lịch Sử</button>}
+          </nav>
+        </div>
+
+        <main className="max-w-7xl mx-auto pb-20">
+          {error && <div className="max-w-3xl mx-auto mb-8 bg-red-950/40 border border-red-800 p-5 rounded-3xl text-xs text-red-400 font-bold uppercase text-center">{error}</div>}
+          {renderContent()}
+        </main>
       </header>
-
-      <main className="w-full max-w-5xl">
-        {renderContent()}
-      </main>
-
-      <footer className="w-full max-w-5xl mt-8 text-center text-lime-400 text-xs">
-        <p>&copy; {new Date().getFullYear()} - Nền tảng phân tích AI. Bảo mật và riêng tư là ưu tiên hàng đầu.</p>
-      </footer>
+      
+      {/* Global AI ChatBot */}
+      <ChatBot />
     </div>
   );
 };

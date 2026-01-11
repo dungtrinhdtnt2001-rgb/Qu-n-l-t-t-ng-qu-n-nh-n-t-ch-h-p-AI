@@ -1,13 +1,16 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { HistoryEntry, Sentiment } from '../types';
 import Card from './common/Card';
 import { getISOWeek, getMonthName } from '../utils/dateUtils';
 import { DownloadIcon } from './icons/DownloadIcon';
+import { PrinterIcon } from './icons/PrinterIcon';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, LineChart, Line, YAxis, CartesianGrid } from 'recharts';
 
 interface HistoricalReportProps {
   history: HistoryEntry[];
   personnelName: string;
+  onDeleteEntry?: (timestamp: string) => void;
 }
 
 type Period = 'week' | 'month' | 'year';
@@ -49,7 +52,45 @@ const TabButton: React.FC<{ label: string; isActive: boolean; onClick: () => voi
     </button>
 );
 
-const HistoricalReport: React.FC<HistoricalReportProps> = ({ history, personnelName }) => {
+const PrintStyles = () => (
+  <style>{`
+    @media print {
+      @page { margin: 1.5cm; size: auto; }
+      body { 
+        background-color: white !important; 
+        color: black !important; 
+        -webkit-print-color-adjust: exact !important; 
+        print-color-adjust: exact !important;
+      }
+      
+      header, footer, nav, .no-print {
+        display: none !important;
+      }
+      
+      #root, body > div { background: white !important; padding: 0 !important; margin: 0 !important; }
+      main { max-width: 100% !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+      
+      .bg-lime-950, .bg-lime-900, .bg-lime-800, .bg-lime-900\\/70, .bg-amber-900\\/30, .bg-amber-800\\/40 {
+        background-color: white !important;
+        border: 1px solid #ccc !important;
+        color: black !important;
+        box-shadow: none !important;
+      }
+      
+      .text-slate-100, .text-slate-200, .text-slate-300, .text-lime-200, .text-lime-300, .text-lime-400, .text-amber-100, .text-amber-300 {
+        color: black !important;
+      }
+
+      .print-hidden { display: none !important; }
+      .print-full-width { width: 100% !important; grid-column: span 3 !important; }
+      .print-overflow-visible { overflow: visible !important; max-height: none !important; }
+      
+      text { fill: black !important; }
+    }
+  `}</style>
+);
+
+const HistoricalReport: React.FC<HistoricalReportProps> = ({ history, personnelName, onDeleteEntry }) => {
   const [period, setPeriod] = useState<Period>('month');
   const [selectedPeriodKey, setSelectedPeriodKey] = useState<string | null>(null);
 
@@ -109,11 +150,13 @@ const HistoricalReport: React.FC<HistoricalReportProps> = ({ history, personnelN
   
   useEffect(() => {
     if (aggregatedData.length > 0) {
-      setSelectedPeriodKey(aggregatedData[0].periodKey);
+      if (!selectedPeriodKey || !aggregatedData.some(d => d.periodKey === selectedPeriodKey)) {
+        setSelectedPeriodKey(aggregatedData[0].periodKey);
+      }
     } else {
       setSelectedPeriodKey(null);
     }
-  }, [aggregatedData]);
+  }, [aggregatedData, selectedPeriodKey]);
 
   const selectedPeriodData = useMemo(() => {
     return aggregatedData.find(d => d.periodKey === selectedPeriodKey);
@@ -135,7 +178,6 @@ const HistoricalReport: React.FC<HistoricalReportProps> = ({ history, personnelN
       'Điểm tinh thần': entry.analysis.sentimentScore,
     }));
   }, [selectedPeriodData]);
-
 
   const handleExportCSV = () => {
     if (aggregatedData.length === 0) return;
@@ -167,32 +209,46 @@ const HistoricalReport: React.FC<HistoricalReportProps> = ({ history, personnelN
     URL.revokeObjectURL(url);
   };
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
-    <Card>
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4 border-b border-lime-700 pb-4">
+    <Card className="print:border-0 print:shadow-none print:p-0">
+      <PrintStyles />
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4 border-b border-lime-700 pb-4 print:border-b-2 print:border-gray-300">
         <div>
-          <h2 className="text-xl font-semibold text-slate-100">Báo Cáo Lịch Sử Tư Tưởng</h2>
-          <p className="text-amber-300">{personnelName}</p>
+          <h2 className="text-xl font-semibold text-slate-100 print:text-2xl print:font-bold">Báo Cáo Lịch Sử Tư Tưởng</h2>
+          <p className="text-amber-300 print:text-lg print:text-gray-600">{personnelName}</p>
         </div>
-        <button
-          onClick={handleExportCSV} disabled={aggregatedData.length === 0}
-          className="mt-4 sm:mt-0 flex items-center justify-center gap-2 px-4 py-2 bg-lime-700 hover:bg-lime-600 text-slate-200 font-medium rounded-lg transition-colors disabled:bg-lime-800 disabled:opacity-50 disabled:cursor-not-allowed"
-          aria-label="Export report to CSV"
-        >
-          <DownloadIcon className="w-4 h-4" />
-          <span>Xuất CSV</span>
-        </button>
+        <div className="flex gap-2 no-print">
+            <button
+            onClick={handleExportCSV} disabled={aggregatedData.length === 0}
+            className="mt-4 sm:mt-0 flex items-center justify-center gap-2 px-4 py-2 bg-lime-700 hover:bg-lime-600 text-slate-200 font-medium rounded-lg transition-colors disabled:bg-lime-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Export report to CSV"
+            >
+            <DownloadIcon className="w-4 h-4" />
+            <span>Xuất CSV</span>
+            </button>
+            <button
+            onClick={handlePrint} disabled={aggregatedData.length === 0}
+            className="mt-4 sm:mt-0 flex items-center justify-center gap-2 px-4 py-2 bg-amber-700 hover:bg-amber-600 text-slate-200 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Export report to PDF"
+            >
+            <PrinterIcon className="w-4 h-4" />
+            <span>Xuất PDF</span>
+            </button>
+        </div>
       </div>
 
-      <div className="flex justify-center mb-6 p-1 rounded-lg bg-lime-950 border border-lime-800 space-x-2">
+      <div className="flex justify-center mb-6 p-1 rounded-lg bg-lime-950 border border-lime-800 space-x-2 no-print">
         <TabButton label="Theo Tuần" isActive={period === 'week'} onClick={() => setPeriod('week')} />
         <TabButton label="Theo Tháng" isActive={period === 'month'} onClick={() => setPeriod('month')} />
         <TabButton label="Theo Năm" isActive={period === 'year'} onClick={() => setPeriod('year')} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-[500px]">
-        {/* Left Panel: Period List */}
-        <div className="lg:col-span-1 bg-lime-950 p-3 rounded-lg border border-lime-800 max-h-[70vh] overflow-y-auto">
+        <div className="lg:col-span-1 bg-lime-950 p-3 rounded-lg border border-lime-800 max-h-[70vh] overflow-y-auto print-hidden">
           {aggregatedData.length > 0 ? (
             <div key={period} className="space-y-2 animate-fade-in">
               {aggregatedData.map(data => (
@@ -225,12 +281,11 @@ const HistoricalReport: React.FC<HistoricalReportProps> = ({ history, personnelN
           )}
         </div>
         
-        {/* Right Panel: Details */}
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 print-full-width">
           {selectedPeriodData ? (
             <div key={selectedPeriodKey} className="space-y-4 animate-fade-in">
               <Card className="!p-4">
-                <h3 className="font-semibold text-slate-100 mb-3">Tổng quan {selectedPeriodData.periodLabel.toLowerCase()}</h3>
+                <h3 className="font-semibold text-slate-100 mb-3 text-sm">Tổng quan {selectedPeriodData.periodLabel.toLowerCase()}</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
                   <div className="bg-lime-950 p-3 rounded-lg">
                       <p className="text-2xl font-bold text-slate-100">{selectedPeriodData.entryCount}</p>
@@ -269,32 +324,41 @@ const HistoricalReport: React.FC<HistoricalReportProps> = ({ history, personnelN
                   </Card>
               )}
 
-              <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-2">
+              <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-2 print-overflow-visible">
                 <h3 className="font-semibold text-slate-100 text-sm">Chi tiết ghi chép</h3>
                 {selectedPeriodData.entries.map((entry, index) => (
-                    <div key={index} className="bg-lime-900/70 p-3 rounded-lg border-l-4" style={{borderColor: getSentimentColor(entry.analysis.sentimentScore)}}>
-                        <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-2 gap-2">
+                    <div key={index} className="relative bg-lime-900/70 p-3 rounded-lg border-l-4 group" style={{borderColor: getSentimentColor(entry.analysis.sentimentScore)}}>
+                        <button 
+                            onClick={() => onDeleteEntry?.(entry.timestamp)}
+                            className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400 transition-all p-1 no-print"
+                            title="Xóa bản ghi"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
+                        <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-2 gap-2 pr-8">
                             <p className="font-bold text-slate-200 text-sm">
                                 {new Date(entry.analysis.date).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </p>
-                            <span className="font-bold px-2 py-0.5 rounded text-xs text-white" style={{backgroundColor: getSentimentColor(entry.analysis.sentimentScore)}}>
+                            <span className="font-bold px-2 py-0.5 rounded text-xs text-white" style={{backgroundColor: getSentimentColor(entry.analysis.sentimentScore), color: 'black'}}>
                                 {entry.analysis.sentimentCategory} ({(entry.analysis.sentimentScore * 100).toFixed(0)}%)
                             </span>
                         </div>
-                         <details className="text-sm">
-                           <summary className="cursor-pointer text-lime-300 hover:text-amber-300">Xem chi tiết phân tích</summary>
-                           <div className="space-y-2 mt-2 pt-2 border-t border-lime-800">
+                         <details className="text-sm print:block" open>
+                           <summary className="cursor-pointer text-lime-300 hover:text-amber-300 no-print">Xem chi tiết phân tích</summary>
+                           <div className="space-y-2 mt-2 pt-2 border-t border-lime-800 print:border-gray-200">
                                <div>
-                                   <h5 className="font-semibold text-lime-300">Tóm tắt:</h5>
-                                   <p className="text-slate-300 text-justify">{entry.analysis.summary}</p>
+                                   <h5 className="font-semibold text-lime-300 print:text-black text-xs">Tóm tắt:</h5>
+                                   <p className="text-slate-300 text-justify text-xs">{entry.analysis.summary}</p>
                                </div>
                                <div>
-                                   <h5 className="font-semibold text-lime-300">Nhận định:</h5>
-                                   <p className="text-slate-300 text-justify">{entry.analysis.insights}</p>
+                                   <h5 className="font-semibold text-lime-300 print:text-black text-xs">Nhận định:</h5>
+                                   <p className="text-slate-300 text-justify text-xs">{entry.analysis.insights}</p>
                                </div>
-                               <div>
-                                   <h5 className="font-semibold text-amber-300">Đề xuất:</h5>
-                                   <p className="text-amber-100 whitespace-pre-line text-justify">{entry.analysis.officerRecommendations}</p>
+                               <div className="print:break-inside-avoid">
+                                   <h5 className="font-semibold text-amber-300 print:text-black text-xs">Đề xuất:</h5>
+                                   <p className="text-amber-100 whitespace-pre-line text-justify text-xs">{entry.analysis.officerRecommendations}</p>
                                </div>
                            </div>
                          </details>
